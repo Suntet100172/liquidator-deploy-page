@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deploy Liquidator di Base</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1a1d21; --muted:#5b6470; --line:#d9dee5; --ok:#1b7f3b; --warn:#9a5b00; --err:#b3261e; --btn:#1f4fd8; --btn2:#444c56; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 22px; margin: 8px 0 4px; }
+  h2 { font-size: 18px; margin: 0 0 8px; }
+  p { margin: 6px 0; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin:14px 0; }
+  .muted { color:var(--muted); font-size:14px; }
+  label { display:block; font-size:14px; color:var(--muted); margin-top:10px; }
+  input[type=text] { width:100%; font: 15px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; padding:10px; border:1px solid var(--line); border-radius:8px; margin-top:4px; }
+  input[readonly] { background:#f0f2f5; color:var(--muted); }
+  input.addr { background:#eef6ff; color:var(--ink); }
+  button { width:100%; font-size:17px; font-weight:600; padding:14px; border:0; border-radius:10px; color:#fff; background:var(--btn); margin-top:12px; }
+  button.secondary { background:var(--btn2); }
+  button:disabled { background:#aab2bd; }
+  .check { display:flex; gap:10px; align-items:flex-start; margin-top:12px; font-size:15px; }
+  .check input { margin-top:4px; width:20px; height:20px; flex: 0 0 20px; }
+  .check label { overflow-wrap: anywhere; }
+  .msg { margin-top:10px; padding:10px 12px; border-radius:8px; font-size:15px; white-space:pre-wrap; word-break:break-word; }
+  .msg.ok { background:#e6f4ea; color:var(--ok); }
+  .msg.warn { background:#fff4e0; color:var(--warn); }
+  .msg.err { background:#fde8e6; color:var(--err); }
+  .msg.info { background:#eef2f7; color:var(--ink); }
+  .addr { font: 600 17px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; word-break:break-all; padding:12px; background:#eef6ff; border:2px solid var(--btn); border-radius:10px; margin-top:10px; }
+  .kv { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space:pre-wrap; word-break:break-all; }
+  a { color:var(--btn); }
+  details { margin-top:10px; } summary { cursor:pointer; color:var(--muted); font-size:14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Deploy Liquidator di Base</h1>
+  <p class="muted">Dua transaksi, masing-masing satu tombol: <b>Deploy</b> kontrak, lalu <b>setOperator</b>. Halaman ini tidak pernah meminta seed atau private key; semua tanda tangan terjadi di wallet Anda (MetaMask + Ledger).</p>
+
+  <div class="card">
+    <h2>1. Hubungkan wallet</h2>
+    <button id="btnConnect">Connect MetaMask</button>
+    <div id="walletInfo" class="kv" style="margin-top:10px"></div>
+    <div id="walletMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>2. Deploy kontrak</h2>
+    <label>owner_ (pengelola kontrak; tidak bisa diganti setelah deploy)</label>
+    <input type="text" id="owner" placeholder="0x..." autocomplete="off" spellcheck="false">
+    <label>treasury_ (penerima profit; bisa diganti owner nanti)</label>
+    <input type="text" id="treasury" placeholder="0x..." autocomplete="off" spellcheck="false">
+    <label>weth_ (WETH di Base, tetap)</label>
+    <input type="text" id="weth" readonly>
+    <div class="check"><input type="checkbox" id="confirmDeploy"><label for="confirmDeploy" style="margin:0;color:var(--ink)">Saya sudah memeriksa owner_ dan treasury_ di atas, dan jaringan MetaMask adalah Base.</label></div>
+    <div id="redeployWrap" class="check" style="display:none"><input type="checkbox" id="confirmRedeploy"><label for="confirmRedeploy" style="margin:0;color:var(--err)"><span id="prevNote"></span> Saya memang mau deploy kontrak BARU (membayar gas lagi).</label></div>
+    <div id="prevContract" class="kv" style="display:none;color:var(--err)"></div>
+    <button id="btnDeploy" disabled>Deploy</button>
+    <div id="deployMsg"></div>
+    <div id="deployResult" style="display:none">
+      <p><b>ALAMAT KONTRAK</b> (salin dan tempel ke chat, hanya ini):</p>
+      <input type="text" class="addr" id="contractAddr" readonly>
+      <button class="secondary" id="btnCopy">Salin alamat kontrak</button>
+      <p class="muted">Kalau tombol salin tidak bekerja: tekan lama kotak alamat di atas, pilih semua, Copy.</p>
+      <div id="deployVerify" class="kv" style="margin-top:10px"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3. Daftarkan operator (setOperator)</h2>
+    <p class="muted">Alamat operator diberikan lewat chat setelah kunci dibuat di server. Hanya owner yang bisa memanggil ini.</p>
+    <label>Alamat kontrak</label>
+    <input type="text" id="opContract" placeholder="0x..." autocomplete="off" spellcheck="false">
+    <label>Alamat operator (dari chat)</label>
+    <input type="text" id="operator" placeholder="0x..." autocomplete="off" spellcheck="false">
+    <button id="btnSetOperator" disabled>setOperator(operator, true)</button>
+    <div id="opMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Cek kontrak (gratis, tanpa tanda tangan)</h2>
+    <label>Alamat kontrak</label>
+    <input type="text" id="checkContract" placeholder="0x..." autocomplete="off" spellcheck="false">
+    <label>Alamat operator (opsional)</label>
+    <input type="text" id="checkOperator" placeholder="0x..." autocomplete="off" spellcheck="false">
+    <button class="secondary" id="btnCheck" disabled>Cek</button>
+    <div id="checkMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Kalau Ledger menolak</h2>
+    <p class="muted">Deploy kontrak dan setOperator adalah data yang tidak dikenali Ledger. Kalau muncul pesan seperti "Blind signing must be enabled" atau transaksi ditolak tanpa sebab: di Ledger buka aplikasi Ethereum &gt; Settings &gt; <b>Blind signing</b> &gt; Enabled, lalu tekan tombolnya lagi. Matikan lagi setelah selesai.</p>
+    <details><summary>Detail teknis</summary>
+      <div class="kv">Chain id 8453 (Base). Bytecode kontrak: 11637 karakter hex, sha256 b13bc785fa6f316bf3b0f083046039a7d02b07a5e5c1f470cb5694265676edff (sama dengan build yang diuji: solc 0.8.30, cancun, optimizer 1000000 runs, via-IR, bytecodeHash none). Fungsi: setOperator 0x558a7297, operators 0x13e7c9d8, owner 0x8da5cb5b, treasury 0x61d027b3, weth 0x3fc8cef3.</div>
+    </details>
+  </div>
+</main>
+<script>
+'use strict';
+/* ------------------------------------------------------------ constants */
+const CHAIN_ID = 8453, CHAIN_HEX = '0x2105';
+const WETH = '0x4200000000000000000000000000000000000006';
+const SEL = { owner: '0x8da5cb5b', treasury: '0x61d027b3', weth: '0x3fc8cef3', operators: '0x13e7c9d8', setOperator: '0x558a7297' };
+const GAS_DEPLOY = '0x2c3f60';      // 2,900,000 (measured 2,523,452)
+const GAS_SET_OPERATOR = '0x13880'; // 80,000 (measured 45,547)
+const EXPLORER = 'https://basescan.org';
+const STORE_KEY = 'liquidator-base-contract';
+const BYTECODE = '0x60c0346100ec57601f612d7538819003918201601f19168301916001600160401b038311848410176100f0578084926060946040528339810103126100ec5761004781610104565b90610060604061005960208401610104565b9201610104565b6080929092526001600160a01b0390811660a0525f80546001600160a01b031916919092169081178255604051917f3c864541ef71378c6229510ed90f376565ee42d9c5e0904a984a9e863e6db44f9080a2612c5c908161011982396080518181816104a0015281816109b601528181610ad50152610ba5015260a051818181610d16015261179b0152f35b5f80fd5b634e487b7160e01b5f52604160045260245ffd5b51906001600160a01b03821682036100ec5756fe6080604052600436101561001a575b3615610018575f80fd5b005b5f3560e01c806309c5eabe14610edc57806313e7c9d814610e745780631b11d0ff14610d8b57806331f5707214610d3a5780633fc8cef314610ccc5780634ee66e9214610c45578063558a729714610b4957806361d027b314610af95780638da5cb5b14610a8b578063b8dc491b14610948578063cf7ea196146108d0578063f04f270714610552578063f0f4426014610452578063fa461e33146103ac5763fb719b600361000e57346103465760207ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc3601126103465760043567ffffffffffffffff811161034657366023820112156103465780600401359067ffffffffffffffff8211610346573660248360051b83010111610346575f91335f52600160205260ff60405f2054161561038457905f907fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbd81360301915b8381101561034a5760248160051b830101358381121561034657820160248101359067ffffffffffffffff82116103465760440190803603821361034657303b15610346576101fb915f9160405193849283927f4ee66e920000000000000000000000000000000000000000000000000000000084526020600485015260248401916114aa565b038183305af19081610336575b506102d657806001917ff314af878c950c2bc3124bca38aae9ccbabb0c9cfb94f6588c54992734ed1c9e602061023c6114e8565b8181519101517fffffffff00000000000000000000000000000000000000000000000000000000811691600481106102a1575b50507fffffffff0000000000000000000000000000000000000000000000000000000060405191168152a25b01610174565b7fffffffff000000000000000000000000000000000000000000000000000000009250829060040360031b1b16165f8061026f565b937fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff81146103095760018091019461029b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b5f6103409161108f565b5f610208565b5f80fd5b84801561035c57602090604051908152f35b7fdd205eb6000000000000000000000000000000000000000000000000000000005f5260045ffd5b7f7c214f04000000000000000000000000000000000000000000000000000000005f5260045ffd5b346103465760607ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc3601126103465760443560043567ffffffffffffffff8211610346576104006020923690600401610f49565b9080939161040c611ce1565b810103126103465773ffffffffffffffffffffffffffffffffffffffff61043561001893610f9a565b16905f81131561044857905b3390612bd4565b5060243590610441565b346103465760207ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261034657610489610f77565b73ffffffffffffffffffffffffffffffffffffffff7f000000000000000000000000000000000000000000000000000000000000000016330361052a5773ffffffffffffffffffffffffffffffffffffffff16807fffffffffffffffffffffffff00000000000000000000000000000000000000005f5416175f557f3c864541ef71378c6229510ed90f376565ee42d9c5e0904a984a9e863e6db44f5f80a2005b7f30cd7471000000000000000000000000000000000000000000000000000000005f5260045ffd5b346103465760807ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc3601126103465760043567ffffffffffffffff81116103465736602382011215610346578060040135906105ad826110d0565b916105bb604051938461108f565b8083526024602084019160051b8301019136831161034657602401905b8282106108b8578360243567ffffffffffffffff8111610346576106009036906004016110e8565b60443567ffffffffffffffff8111610346576106209036906004016110e8565b9160643567ffffffffffffffff81116103465761064190369060040161117f565b610649611ce1565b8051810160208101916020818303126103465760208101519067ffffffffffffffff821161034657019061016082820312610346576040519261068b8461100d565b602083015160048110156103465784526106a760408401611409565b60208501526106b860608401611409565b60408501526080830151606085015260a083015160038110156103465760808501526106e660c08401611409565b60a085015260e083015167ffffffffffffffff81116103465781602061070e9286010161142a565b60c085015261010083015167ffffffffffffffff81116103465760209084010181601f8201121561034657805192610745846110d0565b93610753604051958661108f565b80855260208086019160051b840101928484116103465760208101915b8483106107ff5750505050610018876107f78a6107f06107e973ffffffffffffffffffffffffffffffffffffffff6107e18d6107dc8e6101608f8f60e08401526107bd6101208201611409565b6101008401526101408101516101208401520151610140820152611dc5565b611470565b511694611470565b5191611470565b51906113fc565b903390612bd4565b825167ffffffffffffffff81116103465782019060e082860312610346576040519061082a82611057565b6020830151600481101561034657825261084660408401611409565b602083015261085760608401611409565b604083015261086860808401611409565b606083015260a0830151608083015260c083015160a083015260e08301519167ffffffffffffffff8311610346576108a88960208096958196010161142a565b60c0820152815201920191610770565b602080916108c584610f9a565b8152019101906105d8565b34610346576108de36610fbb565b6108e9929192611ce1565b82019160408184031261034657803567ffffffffffffffff81116103465773ffffffffffffffffffffffffffffffffffffffff61093a6020610933610018976109419587016111c5565b9401610f9a565b169161272b565b3390612667565b346103465760407ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc3601126103465761097f610f77565b60243573ffffffffffffffffffffffffffffffffffffffff811681036103465773ffffffffffffffffffffffffffffffffffffffff7f000000000000000000000000000000000000000000000000000000000000000016330361052a5773ffffffffffffffffffffffffffffffffffffffff8216610a16575f80809350389247905af115610a0957005b63b12d13eb5f526004601cfd5b6370a082315f5230602052602060346024601c855afa601f3d111615610a7e576014526fa9059cbb0000000000000000000000005f5260205f6044601082855af1908160015f51141615610a6d575b50505f603452005b3b153d171015610a7e578080610a65565b6390b8ec185f526004601cfd5b34610346575f7ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261034657602060405173ffffffffffffffffffffffffffffffffffffffff7f0000000000000000000000000000000000000000000000000000000000000000168152f35b34610346575f7ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261034657602073ffffffffffffffffffffffffffffffffffffffff5f5416604051908152f35b346103465760407ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261034657610b80610f77565b602435908115158092036103465773ffffffffffffffffffffffffffffffffffffffff7f000000000000000000000000000000000000000000000000000000000000000016330361052a57602073ffffffffffffffffffffffffffffffffffffffff7f1a594081ae893ab78e67d9b9e843547318164322d32c65369d78a96172d9dc8f921692835f526001825260405f207fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0081541660ff8316179055604051908152a2005b346103465760207ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc3601126103465760043567ffffffffffffffff811161034657610c94903690600401610f49565b303303610ca45761001891611597565b7f29c3b7ee000000000000000000000000000000000000000000000000000000005f5260045ffd5b34610346575f7ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261034657602060405173ffffffffffffffffffffffffffffffffffffffff7f0000000000000000000000000000000000000000000000000000000000000000168152f35b3461034657610018610d7873ffffffffffffffffffffffffffffffffffffffff6040610d6536610fbb565b610d70959295611ce1565b8101906112f2565b610d8181611dc5565b0151163390612667565b346103465760a07ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261034657610dc2610f77565b6064359073ffffffffffffffffffffffffffffffffffffffff82168092036103465760843567ffffffffffffffff811161034657610e04903690600401610f49565b92610e0d611ce1565b3003610e4c57610e2681610e4194610e2b9301906112f2565b611dc5565b610e396044356024356113fc565b903390612667565b602060405160018152f35b7f06ef72f2000000000000000000000000000000000000000000000000000000005f5260045ffd5b346103465760207ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc3601126103465773ffffffffffffffffffffffffffffffffffffffff610ec0610f77565b165f526001602052602060ff60405f2054166040519015158152f35b346103465760207ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc3601126103465760043567ffffffffffffffff811161034657610f2b903690600401610f49565b335f52600160205260ff60405f205416156103845761001891611597565b9181601f840112156103465782359167ffffffffffffffff8311610346576020838186019501011161034657565b6004359073ffffffffffffffffffffffffffffffffffffffff8216820361034657565b359073ffffffffffffffffffffffffffffffffffffffff8216820361034657565b9060407ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc83011261034657600435916024359067ffffffffffffffff82116103465761100991600401610f49565b9091565b610160810190811067ffffffffffffffff82111761102a57604052565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52604160045260245ffd5b60e0810190811067ffffffffffffffff82111761102a57604052565b6080810190811067ffffffffffffffff82111761102a57604052565b90601f7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0910116810190811067ffffffffffffffff82111761102a57604052565b67ffffffffffffffff811161102a5760051b60200190565b9080601f830112156103465781356110ff816110d0565b9261110d604051948561108f565b81845260208085019260051b82010192831161034657602001905b8282106111355750505090565b8135815260209182019101611128565b67ffffffffffffffff811161102a57601f017fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe01660200190565b81601f820112156103465780359061119682611145565b926111a4604051948561108f565b8284526020838301011161034657815f926020809301838601378301015290565b9080601f83011215610346578135916111dd836110d0565b926111eb604051948561108f565b80845260208085019160051b830101918383116103465760208101915b83831061121757505050505090565b823567ffffffffffffffff81116103465782019060e07fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe08388030112610346576040519061126482611057565b6020830135600481101561034657825261128060408401610f9a565b602083015261129160608401610f9a565b60408301526112a260808401610f9a565b606083015260a0830135608083015260c083013560a083015260e08301359167ffffffffffffffff8311610346576112e28860208096958196010161117f565b60c0820152815201920191611208565b6020818303126103465780359067ffffffffffffffff82116103465701906101608282031261034657604051916113288361100d565b8035600481101561034657835261134160208201610f9a565b602084015261135260408201610f9a565b6040840152606081013560608401526080810135600381101561034657608084015261138060a08201610f9a565b60a084015260c081013567ffffffffffffffff811161034657826113a591830161117f565b60c084015260e081013567ffffffffffffffff811161034657610140926113cd9183016111c5565b60e08401526113df6101008201610f9a565b610100840152610120810135610120840152013561014082015290565b9190820180921161030957565b519073ffffffffffffffffffffffffffffffffffffffff8216820361034657565b81601f820112156103465780519061144182611145565b9261144f604051948561108f565b8284526020838301011161034657815f9260208093018386015e8301015290565b80511561147d5760200190565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52603260045260245ffd5b601f82602094937fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe093818652868601375f8582860101520116010190565b3d15611512573d906114f982611145565b91611507604051938461108f565b82523d5f602084013e565b606090565b6004111561152157565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52602160045260245ffd5b90602080835192838152019201905f5b81811061156b5750505090565b825173ffffffffffffffffffffffffffffffffffffffff1684526020938401939092019160010161155e565b906115a4818301836112f2565b906101008201918251936115d05f9573ffffffffffffffffffffffffffffffffffffffff309116612c21565b9282516115dc81611517565b6115e581611517565b6118e45750506115f481611dc5565b73ffffffffffffffffffffffffffffffffffffffff7f8e070222678f3ff1321992272cd12f85ad4b4af91ce5b2257f8844cf7a5d31c75c166118bc576116513073ffffffffffffffffffffffffffffffffffffffff855116612c21565b91808311156118b457611664908361271e565b905b81926101408201519283611784575b5061012082015180851061175457509081608092611714575b5001519260038410156116e7579160409173ffffffffffffffffffffffffffffffffffffffff7f7c888da1f1b35d8a03283a5c09e0ecde30b7b7b96ac1dee8efd26ea6c2c6d2cc945116955082519182526020820152a3565b6024857f4e487b710000000000000000000000000000000000000000000000000000000081526021600452fd5b61174e9073ffffffffffffffffffffffffffffffffffffffff87511673ffffffffffffffffffffffffffffffffffffffff89541690612bd4565b5f61168e565b86604491867f88215f9c000000000000000000000000000000000000000000000000000000008352600452602452fd5b73ffffffffffffffffffffffffffffffffffffffff7f000000000000000000000000000000000000000000000000000000000000000016803b156118a5576040517f2e1a7d4d000000000000000000000000000000000000000000000000000000008152856004820152888160248183865af180156118a957908991611890575b5080808088415af16118156114e8565b50156118685773ffffffffffffffffffffffffffffffffffffffff8751160361167557909350828082111561185d57611851816118579361271e565b9461271e565b5f611675565b611857915086611851565b6004887f7d24f693000000000000000000000000000000000000000000000000000000008152fd5b8161189a9161108f565b6118a557875f611805565b8780fd5b6040513d8b823e3d90fd5b508390611666565b6004847fdab1e993000000000000000000000000000000000000000000000000000000008152fd5b600183516118f181611517565b6118fa81611517565b036119f75773ffffffffffffffffffffffffffffffffffffffff602084015116807f8e070222678f3ff1321992272cd12f85ad4b4af91ce5b2257f8844cf7a5d31c75d73ffffffffffffffffffffffffffffffffffffffff604085015116606085015190823b156119f3579088809493926119b6604051978896879586947fe0232b42000000000000000000000000000000000000000000000000000000008652600486015260248501526060604485015260648401916114aa565b03925af180156119e8579085916119cf575b50506115f4565b816119d99161108f565b6119e457835f6119c8565b8380fd5b6040513d87823e3d90fd5b8880fd5b9060028351611a0581611517565b611a0e81611517565b03611bea57604090815192611a23838561108f565b600184527fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe083019081366020870137835192611a5f858561108f565b60018452602084019236843773ffffffffffffffffffffffffffffffffffffffff8588015116611a8e87611470565b526060870151611a9d85611470565b5273ffffffffffffffffffffffffffffffffffffffff60208801511693847f8e070222678f3ff1321992272cd12f85ad4b4af91ce5b2257f8844cf7a5d31c75d843b15611be65791611b2f9693918b959360208851998a977f5c38449e0000000000000000000000000000000000000000000000000000000089523060048a0152608060248a0152608489019061154e565b917ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc8884030160448901525191828152019390875b818110611bca57505050611ba78387938795937ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc878096030160648601526114aa565b03925af1908115611bc157509085916119cf5750506115f4565b513d87823e3d90fd5b825186528e98508a975060209586019590920191600101611b64565b8a80fd5b9073ffffffffffffffffffffffffffffffffffffffff60208401511690817f8e070222678f3ff1321992272cd12f85ad4b4af91ce5b2257f8844cf7a5d31c75d73ffffffffffffffffffffffffffffffffffffffff604085015116916060850151813b15610346575f8094611ca6604051978896879586947f42b0b77c0000000000000000000000000000000000000000000000000000000086523060048701526024860152604485015260a0606485015260a48401916114aa565b82608483015203925af18015611cd657611cc1575b506115f4565b611cce9194505f9061108f565b5f925f611cbb565b6040513d5f823e3d90fd5b73ffffffffffffffffffffffffffffffffffffffff7f8e070222678f3ff1321992272cd12f85ad4b4af91ce5b2257f8844cf7a5d31c75c163303611d44575f7f8e070222678f3ff1321992272cd12f85ad4b4af91ce5b2257f8844cf7a5d31c75d565b7fdab1e993000000000000000000000000000000000000000000000000000000005f5260045ffd5b907fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0601f602080948051918291828752018686015e5f8582860101520116010190565b9190826040910312610346576020825192015190565b60808101908151915f92600381101561152157611f1657509060c0820151608081805181010312611f125760405190611dfd82611073565b611e0960208201611409565b8252611e1760408201611409565b91602081019083825273ffffffffffffffffffffffffffffffffffffffff8080806080611e4660608901611409565b9760408701988952015197611e6d6060870199808b5260a08d019284808551169116612667565b51169351169351169351169351813b15611f0e57918560a49281959460405197889687957ea718a900000000000000000000000000000000000000000000000000000000875260048701526024860152604485015260648401528160848401525af18015611f0357611eeb575b505060e0611ee991015161272b565b565b611ef682809261108f565b611f005780611eda565b80fd5b6040513d84823e3d90fd5b8580fd5b5080fd5b516003811015611521576001036123465760c08101519081805181010361010081126119e45760a060405191611f4b83611073565b126119e45760405160a0810181811067ffffffffffffffff82111761231957604052611f7960208501611409565b8152611f8760408501611409565b91602082019283526060611f9c818701611409565b9560408401968752611fb060808201611409565b9282850193845260a082015160808601908152858252611fd260c08401611409565b9182602082015261010060e0850151948560408401520151948591015260e073ffffffffffffffffffffffffffffffffffffffff60a08a01511698897f8e070222678f3ff1321992272cd12f85ad4b4af91ce5b2257f8844cf7a5d31c75d01519473ffffffffffffffffffffffffffffffffffffffff8751166040519687918d6060840160406020860152835180915260808501602060808360051b880101950192905b82821061223e57505050506040830152037fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0810187526120b6908761108f565b604051998a9889987fd8eabcb8000000000000000000000000000000000000000000000000000000008a525173ffffffffffffffffffffffffffffffffffffffff1660048a01525173ffffffffffffffffffffffffffffffffffffffff1660248901525173ffffffffffffffffffffffffffffffffffffffff1660448801525173ffffffffffffffffffffffffffffffffffffffff16606487015251608486015273ffffffffffffffffffffffffffffffffffffffff1660a485015260c484015260e483015261010482016101209052610124820161219491611d6c565b0381855a94604095f18015611f0357612210575b5073ffffffffffffffffffffffffffffffffffffffff7f8e070222678f3ff1321992272cd12f85ad4b4af91ce5b2257f8844cf7a5d31c75c166121e85750565b807fdab1e9930000000000000000000000000000000000000000000000000000000060049252fd5b6122319060403d604011612237575b612229818361108f565b810190611daf565b506121a8565b503d61221f565b9193946020612308827fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff80600195979a84950301865260e060c08b51805161228481611517565b845273ffffffffffffffffffffffffffffffffffffffff86820151168685015273ffffffffffffffffffffffffffffffffffffffff604082015116604085015273ffffffffffffffffffffffffffffffffffffffff60608201511660608501526080810151608085015260a081015160a08501520151918160c08201520190611d6c565b9701920192018b9594939192612076565b6024867f4e487b710000000000000000000000000000000000000000000000000000000081526041600452fd5b9060c082015180518101602081019160208183031261034657602081015167ffffffffffffffff8111610346570190608090829003126103465760405161238c81611073565b602082015167ffffffffffffffff8111610346576020908301019280601f850112156103465783516123bd816110d0565b946123cb604051968761108f565b81865260208087019260051b82010192831161034657602001905b82821061264f575050508281526123ff60408301611409565b9260208201938452606060808185015194604085019586520151920191825280516125be575b5073ffffffffffffffffffffffffffffffffffffffff835116612454575b5050505060e0611ee991015161272b565b60a085016004602073ffffffffffffffffffffffffffffffffffffffff835116604051928380927fc55dae630000000000000000000000000000000000000000000000000000000082525afa9081156125b357869161255c575b50816124d773ffffffffffffffffffffffffffffffffffffffff93928480945116875191612667565b51169351169051915192803b15612558578492918360849260405196879586947fe4e6e7790000000000000000000000000000000000000000000000000000000086526004860152602485015260448401523060648401525af18015611f0357612543575b8080612443565b61254e82809261108f565b611f00578061253c565b8480fd5b90506020813d6020116125ab575b816125776020938361108f565b81010312611f0e5773ffffffffffffffffffffffffffffffffffffffff916124d76125a28493611409565b925050916124ae565b3d915061256a565b6040513d88823e3d90fd5b73ffffffffffffffffffffffffffffffffffffffff60a087015116803b156103465761262b5f929183926040519485809481937fc3cecfd200000000000000000000000000000000000000000000000000000000835230600484015260406024840152604483019061154e565b03925af18015611cd65715612425576126479194505f9061108f565b5f925f612425565b6020809161265c84611409565b8152019101906123e6565b9190601452806034526f095ea7b30000000000000000000000005f5260205f6044601082865af18060015f511416156126a4575b5050505f603452565b3d833b151710156126b6575b8061269b565b5f6034526f095ea7b30000000000000000000000005f525f386044601083865af15060345260205f6044601082855af1908160015f5114166126b0573b153d171015612703575f806126b0565b633e3f8f735f526004601cfd5b519081600f0b820361034657565b9190820391821161030957565b5f5b8151811015612bd057815181101561147d5760208160051b83010151608081015180155f14612bcb575061277b3073ffffffffffffffffffffffffffffffffffffffff604084015116612c21565b606082016127a03073ffffffffffffffffffffffffffffffffffffffff835116612c21565b9183516127ac81611517565b6127b581611517565b61298f57604073ffffffffffffffffffffffffffffffffffffffff9182828701511690838551168210905f8560208a01511692837f8e070222678f3ff1321992272cd12f85ad4b4af91ce5b2257f8844cf7a5d31c75d808214612971576128866401000276a4955b875190602082015260208152612833888261108f565b8751988997889687957f128acb080000000000000000000000000000000000000000000000000000000087523060048801526024870152604486015216606484015260a0608484015260a4830190611d6c565b03925af18015611cd657612946575b5073ffffffffffffffffffffffffffffffffffffffff7f8e070222678f3ff1321992272cd12f85ad4b4af91ce5b2257f8844cf7a5d31c75c16611d445760a0916128fb612900925b73ffffffffffffffffffffffffffffffffffffffff30915116612c21565b61271e565b9101519081811061291557505060010161272d565b827e6eada2000000000000000000000000000000000000000000000000000000005f5260045260245260445260645ffd5b604090813d811161296a575b61295c818361108f565b81010312610346575f612895565b503d612952565b61288673fffd8963efd1fc6a506488495d951d5263988d259561281d565b90916001845161299e81611517565b6129a781611517565b03612a8d5760c0840151604081805181010312610346576129d660406129cf60208401612710565b9201612710565b73ffffffffffffffffffffffffffffffffffffffff80604088015116612a058660208a01928484511690612667565b511660a087015192813b15610346575f608492819560405198899687957f3df02124000000000000000000000000000000000000000000000000000000008752600f0b6004870152600f0b6024860152604485015260648401525af18015611cd65760a093612900936128fb92612a7d575b506128dd565b5f612a879161108f565b5f612a77565b60028451612a9a81611517565b612aa381611517565b03612b5f57612abf60c085015160208082518301019101611daf565b73ffffffffffffffffffffffffffffffffffffffff80604088015116612aee8660208a01928484511690612667565b511660a087015192813b15610346575f608492819560405198899687957f5b41b90800000000000000000000000000000000000000000000000000000000875260048701526024860152604485015260648401525af18015611cd65760a093612900936128fb92612a7d57506128dd565b91905f73ffffffffffffffffffffffffffffffffffffffff8192612b93826040890151169160208901928484511690612667565b511660c08601519082602083519301915af1612bad6114e8565b9015612bc3575060a0916128fb612900926128dd565b602081519101fd5b61277b565b5050565b91906014526034526fa9059cbb0000000000000000000000005f5260205f6044601082855af1908160015f51141615612c10575b50505f603452565b3b153d171015610a7e575f80612c08565b602460106020939284936014526f70a082310000000000000000000000005f525afa601f3d1116602051029056fea164736f6c634300081e000a';
+
+/* ----------------------------------------------------------- keccak-256 */
+// Keccak-f[1600] on 25 64-bit lanes (BigInt), rate 1088, Keccak padding
+// (0x01 ... 0x80): the pre-NIST variant Ethereum uses.
+const K_RC = [
+  '0x0000000000000001','0x0000000000008082','0x800000000000808a','0x8000000080008000','0x000000000000808b','0x0000000080000001',
+  '0x8000000080008081','0x8000000000008009','0x000000000000008a','0x0000000000000088','0x0000000080008009','0x000000008000000a',
+  '0x000000008000808b','0x800000000000008b','0x8000000000008089','0x8000000000008003','0x8000000000008002','0x8000000000000080',
+  '0x000000000000800a','0x800000008000000a','0x8000000080008081','0x8000000000008080','0x0000000080000001','0x8000000080008008',
+].map(BigInt);
+const K_ROT = [0,1,62,28,27,36,44,6,55,20,3,10,43,25,39,41,45,15,21,8,18,2,61,56,14]; // r[x + 5y]
+const M64 = (1n << 64n) - 1n;
+const rotl = (v, n) => n === 0 ? v : (((v << BigInt(n)) | (v >> BigInt(64 - n))) & M64);
+function keccakF(A) {
+  for (let round = 0; round < 24; round++) {
+    const C = [], D = [];
+    for (let x = 0; x < 5; x++) C[x] = A[x] ^ A[x + 5] ^ A[x + 10] ^ A[x + 15] ^ A[x + 20];
+    for (let x = 0; x < 5; x++) D[x] = C[(x + 4) % 5] ^ rotl(C[(x + 1) % 5], 1);
+    for (let i = 0; i < 25; i++) A[i] ^= D[i % 5];
+    const B = new Array(25);
+    for (let x = 0; x < 5; x++) for (let y = 0; y < 5; y++) B[y + 5 * ((2 * x + 3 * y) % 5)] = rotl(A[x + 5 * y], K_ROT[x + 5 * y]);
+    for (let x = 0; x < 5; x++) for (let y = 0; y < 5; y++) A[x + 5 * y] = B[x + 5 * y] ^ ((~B[(x + 1) % 5 + 5 * y] & M64) & B[(x + 2) % 5 + 5 * y]);
+    A[0] ^= K_RC[round];
+  }
+}
+function keccak256(bytes) {
+  const rate = 136, A = new Array(25).fill(0n);
+  const padded = new Uint8Array(Math.ceil((bytes.length + 1) / rate) * rate);
+  padded.set(bytes); padded[bytes.length] ^= 0x01; padded[padded.length - 1] ^= 0x80;
+  for (let off = 0; off < padded.length; off += rate) {
+    for (let i = 0; i < rate / 8; i++) {
+      let lane = 0n;
+      for (let b = 7; b >= 0; b--) lane = (lane << 8n) | BigInt(padded[off + i * 8 + b]);
+      A[i] ^= lane;
+    }
+    keccakF(A);
+  }
+  const out = new Uint8Array(32);
+  for (let i = 0; i < 4; i++) for (let b = 0; b < 8; b++) out[i * 8 + b] = Number((A[i] >> BigInt(8 * b)) & 0xffn);
+  return out;
+}
+const toHex = (bytes) => Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+const utf8 = (s) => new TextEncoder().encode(s);
+
+/* ------------------------------------------------------------ addresses */
+const isHexAddr = (s) => /^0x[0-9a-fA-F]{40}$/.test(s);
+function toChecksum(addr) {
+  const low = addr.toLowerCase().slice(2), h = toHex(keccak256(utf8(low)));
+  let out = '0x';
+  for (let i = 0; i < 40; i++) out += parseInt(h[i], 16) >= 8 ? low[i].toUpperCase() : low[i];
+  return out;
+}
+// Returns the checksummed address, or throws a message in Indonesian.
+function parseAddr(s, what) {
+  s = (s || '').trim();
+  if (!isHexAddr(s)) throw new Error(`${what}: harus 0x diikuti 40 karakter heksadesimal (42 karakter), bukan "${s.slice(0, 50)}".`);
+  const sum = toChecksum(s), hex = s.slice(2);
+  const mixed = /[a-f]/.test(hex) && /[A-F]/.test(hex);
+  if (mixed && s !== sum) throw new Error(`${what}: huruf besar/kecilnya tidak cocok dengan checksum (salah ketik?). Periksa lagi: ${s}`);
+  if (/^0x0{40}$/.test(s)) throw new Error(`${what}: alamat nol tidak boleh.`);
+  return sum;
+}
+const pad32 = (addr) => addr.toLowerCase().slice(2).padStart(64, '0');
+const wordToAddr = (word) => (word && /^0x[0-9a-fA-F]{64}$/.test(word)) ? toChecksum('0x' + word.slice(26)) : null;
+const wordToBool = (word) => word === '0x' + '0'.repeat(63) + '1' ? true : (word === '0x' + '0'.repeat(64) ? false : null);
+const short = (a) => a.slice(0, 8) + '…' + a.slice(-6);
+const weiToEth = (hex) => { const w = BigInt(hex); const s = (w / 10n ** 14n).toString().padStart(5, '0'); return s.slice(0, -4) + ',' + s.slice(-4); };
+
+/* --------------------------------------------------------------- wallet */
+const $ = (id) => document.getElementById(id);
+const eth = () => window.ethereum;
+const STORE_PENDING = 'liquidator-base-pending';
+let account = null, chainId = null, busy = false, listenersOn = false, prefillAccount = null, resumed = false;
+
+function setMsg(id, kind, text) { const el = $(id); el.innerHTML = ''; if (!text) return; const d = document.createElement('div'); d.className = 'msg ' + kind; d.textContent = text; el.appendChild(d); }
+function appendMsg(id, kind, text) { const d = document.createElement('div'); d.className = 'msg ' + kind; d.textContent = text; $(id).appendChild(d); }
+function describe(err) {
+  if (!err) return 'kesalahan tidak dikenal';
+  if (err.code === 4001 || /user rejected|denied|cancel/i.test(err.message || '')) return 'Transaksi dibatalkan di wallet (MetaMask atau Ledger menolak).';
+  return (err.message || String(err)).slice(0, 400);
+}
+async function rpc(method, params) { return eth().request({ method, params: params || [] }); }
+async function call(to, data) { return rpc('eth_call', [{ to, data }, 'latest']); }
+const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+
+function store(key) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch (e) { return null; } }
+function storeSet(key, v) { try { if (v === null) localStorage.removeItem(key); else localStorage.setItem(key, JSON.stringify(v)); } catch (e) {} }
+function loadContract() { const v = store(STORE_KEY); return typeof v === 'string' && isHexAddr(v) ? v : null; }
+function saveContract(a) { storeSet(STORE_KEY, a); }
+const loadPending = () => store(STORE_PENDING);
+const savePending = (p) => storeSet(STORE_PENDING, p);
+const clearPending = () => storeSet(STORE_PENDING, null);
+
+function applyButtons() {
+  const ready = !!account && chainId === CHAIN_ID;
+  $('btnDeploy').disabled = !ready || busy;
+  $('btnSetOperator').disabled = !ready || busy;
+  $('btnCheck').disabled = !ready;
+  $('btnConnect').disabled = busy;
+}
+function showGuard() {
+  const prev = loadContract(), pend = loadPending();
+  let note = '', detail = '';
+  if (pend && pend.kind === 'deploy') { note = 'Ada transaksi deploy dari halaman ini yang belum selesai.'; detail = 'deploy belum selesai: ' + (pend.hash ? pend.hash : 'nonce ' + pend.nonce + ' dari ' + pend.from); }
+  else if (prev) { note = 'Kontrak sudah pernah di-deploy dari halaman ini.'; detail = 'kontrak sebelumnya: ' + prev; }
+  $('prevNote').textContent = note;
+  $('prevContract').textContent = detail;
+  $('prevContract').style.display = detail ? 'block' : 'none';
+  $('redeployWrap').style.display = note ? 'flex' : 'none';
+  if (prev) { if (!$('opContract').value) $('opContract').value = prev; if (!$('checkContract').value) $('checkContract').value = prev; }
+}
+function attachListeners() {
+  if (listenersOn || !eth() || !eth().on) return;
+  listenersOn = true;
+  eth().on('accountsChanged', () => refreshWallet());
+  eth().on('chainChanged', () => refreshWallet());
+}
+async function refreshWallet(keepMsg) {
+  attachListeners();
+  if (!eth()) { applyButtons(); return; }
+  try {
+    const accounts = await rpc('eth_accounts');
+    account = accounts && accounts[0] ? toChecksum(accounts[0]) : null;
+    chainId = parseInt(await rpc('eth_chainId'), 16);
+  } catch (e) { setMsg('walletMsg', 'err', describe(e)); applyButtons(); return; }
+  let info = '';
+  if (account) {
+    info += `akun: ${account}\n`;
+    info += `jaringan: ${chainId === CHAIN_ID ? 'Base (8453)' : 'chain id ' + chainId + ' (BUKAN Base)'}\n`;
+    if (chainId === CHAIN_ID) {
+      try { info += `saldo: ${weiToEth(await rpc('eth_getBalance', [account, 'latest']))} ETH`; } catch (e) { info += 'saldo: ?'; }
+    }
+  }
+  $('walletInfo').textContent = info;
+  if (!keepMsg) {
+    if (!account) setMsg('walletMsg', 'info', 'Tekan Connect MetaMask, lalu pilih akun Ledger (owner).');
+    else if (chainId !== CHAIN_ID) setMsg('walletMsg', 'warn', 'Jaringan MetaMask bukan Base. Tekan Connect MetaMask lagi untuk pindah ke Base, atau ganti jaringan di MetaMask.');
+    else setMsg('walletMsg', 'ok', 'Wallet siap di jaringan Base.');
+  }
+  // owner_/treasury_ follow the connected account as long as they are the
+  // untouched prefill (the user may connect a hot account first, then the Ledger).
+  if (account && !busy) {
+    const o = $('owner'), t = $('treasury');
+    const untouchedO = !o.value || (prefillAccount && o.value === prefillAccount);
+    const untouchedT = !t.value || (prefillAccount && t.value === prefillAccount);
+    if (untouchedO && o.value !== account) { o.value = account; if (prefillAccount) appendMsg('walletMsg', 'info', `owner_ diisi ulang dengan akun yang terhubung: ${account}`); }
+    if (untouchedT && t.value !== account) t.value = account;
+    prefillAccount = account;
+  }
+  applyButtons();
+  showGuard();
+  if (account && chainId === CHAIN_ID && !busy && !resumed) { resumed = true; resumePending().catch(e => setMsg('deployMsg', 'err', describe(e))); }
+}
+async function connect() {
+  if (!eth()) { refreshWallet(); return; }
+  if (busy) return;
+  setMsg('walletMsg', 'info', 'Meminta akses di MetaMask...');
+  try {
+    await rpc('eth_requestAccounts');
+    const cid = parseInt(await rpc('eth_chainId'), 16);
+    if (cid !== CHAIN_ID) {
+      try { await rpc('wallet_switchEthereumChain', [{ chainId: CHAIN_HEX }]); }
+      catch (e) {
+        const unknown = e && (e.code === 4902 || (e.data && e.data.originalError && e.data.originalError.code === 4902) || /4902|unrecognized chain|not added/i.test(e.message || ''));
+        if (unknown) await rpc('wallet_addEthereumChain', [{ chainId: CHAIN_HEX, chainName: 'Base', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://mainnet.base.org'], blockExplorerUrls: [EXPLORER] }]);
+        else throw e;
+      }
+    }
+  } catch (e) {
+    setMsg('walletMsg', 'err', (e && e.code === 4001) ? 'Permintaan koneksi ditolak di MetaMask. Tekan Connect lagi, lalu pilih Connect/Setujui.' : describe(e));
+    await refreshWallet(true);
+    return;
+  }
+  await refreshWallet();
+}
+
+// Live state right before signing: the wallet may have moved to another
+// account or network since the form was filled.
+async function assertLive() {
+  const accounts = await rpc('eth_accounts');
+  const live = accounts && accounts[0] ? toChecksum(accounts[0]) : null;
+  const cid = parseInt(await rpc('eth_chainId'), 16);
+  if (cid !== CHAIN_ID) throw new Error(`Jaringan MetaMask sekarang chain id ${cid}, bukan Base (8453). Pindah ke Base dulu.`);
+  if (!live || !account || live.toLowerCase() !== account.toLowerCase()) throw new Error(`Akun di MetaMask berubah (${live}). Tekan Connect lagi, periksa owner_/treasury_, lalu ulangi.`);
+}
+async function waitReceipt(hash, msgId) {
+  for (let i = 0; i < 240; i++) {
+    const r = await rpc('eth_getTransactionReceipt', [hash]).catch(() => null);
+    if (r && r.blockNumber) return r;
+    setMsg(msgId, 'info', `Menunggu transaksi masuk blok (${i * 3} detik)...\n${hash}\n${EXPLORER}/tx/${hash}`);
+    await sleep(3000);
+  }
+  throw new Error(`Transaksi belum masuk blok setelah 12 menit: ${hash}. Cek di ${EXPLORER}/tx/${hash}. Halaman ini tetap mengingatnya; muat ulang halaman untuk melanjutkan menunggu. Jangan deploy ulang sebelum jelas.`);
+}
+async function readContract(c) {
+  const code = await rpc('eth_getCode', [c, 'latest']);
+  const codeBytes = code && code.length > 2 ? (code.length - 2) / 2 : 0;
+  if (codeBytes === 0) return { owner: null, treasury: null, weth: null, codeBytes: 0 };
+  let o, t, w;
+  try { [o, t, w] = await Promise.all([call(c, SEL.owner), call(c, SEL.treasury), call(c, SEL.weth)]); }
+  catch (e) { throw new Error(`Alamat ${c} adalah kontrak lain, bukan Liquidator (owner() gagal: ${describe(e).slice(0, 80)}). Periksa alamat kontraknya.`); }
+  const r = { owner: wordToAddr(o), treasury: wordToAddr(t), weth: wordToAddr(w), codeBytes };
+  if (!r.owner || !r.treasury || !r.weth) throw new Error(`Alamat ${c} adalah kontrak lain, bukan Liquidator (owner()/treasury()/weth() tidak menjawab alamat).`);
+  return r;
+}
+async function readOperator(c, op) { return wordToBool(await call(c, SEL.operators + pad32(op))); }
+
+// CREATE address of (sender, nonce): keccak256(rlp([sender, nonce]))[12:].
+function createAddress(sender, nonce) {
+  const addr = sender.toLowerCase().slice(2);
+  let n = '';
+  if (nonce === 0) n = '80';
+  else { let h = nonce.toString(16); if (h.length % 2) h = '0' + h; n = (nonce < 128 ? '' : (0x80 + h.length / 2).toString(16)) + h; }
+  const payload = '94' + addr + n;
+  const rlp = (0xc0 + payload.length / 2).toString(16) + payload;
+  const bytes = new Uint8Array(rlp.match(/../g).map(b => parseInt(b, 16)));
+  return toChecksum('0x' + toHex(keccak256(bytes)).slice(24));
+}
+
+/* --------------------------------------------------------------- deploy */
+function showDeployed(c, r, verify) {
+  $('contractAddr').value = c; $('deployResult').style.display = 'block';
+  $('opContract').value = c; $('checkContract').value = c;
+  let text = (r ? `blok ${parseInt(r.blockNumber, 16)}, gas ${parseInt(r.gasUsed, 16)}` : 'ditemukan dari transaksi sebelumnya');
+  if (verify) text += `, kode ${verify.codeBytes} byte\nowner() ${verify.owner}\ntreasury() ${verify.treasury}\nweth() ${verify.weth}`;
+  text += `\n${EXPLORER}/address/${c}`;
+  $('deployVerify').textContent = text;
+}
+async function finishDeploy(hash, owner, treasury) {
+  const r = await waitReceipt(hash, 'deployMsg');
+  if (r.status !== '0x1') { clearPending(); throw new Error(`Transaksi deploy GAGAL (revert) di blok ${parseInt(r.blockNumber, 16)}: ${EXPLORER}/tx/${hash}. Tidak ada kontrak; boleh deploy lagi setelah penyebabnya jelas.`); }
+  if (!r.contractAddress) { clearPending(); throw new Error(`Transaksi ${hash} masuk blok tapi bukan pembuatan kontrak. Kirim layar ini ke chat.`); }
+  const c = toChecksum(r.contractAddress);
+  saveContract(c); clearPending(); showDeployed(c, r, null); showGuard();
+  setMsg('deployMsg', 'ok', `Kontrak terpasang di ${c}. Memverifikasi...`);
+  try {
+    const info = await readContract(c);
+    const problems = [];
+    if (owner && info.owner.toLowerCase() !== owner.toLowerCase()) problems.push(`owner() = ${info.owner}, bukan ${owner}`);
+    if (treasury && info.treasury.toLowerCase() !== treasury.toLowerCase()) problems.push(`treasury() = ${info.treasury}, bukan ${treasury}`);
+    if (info.weth.toLowerCase() !== WETH.toLowerCase()) problems.push(`weth() = ${info.weth}, bukan ${WETH}`);
+    showDeployed(c, r, info);
+    if (problems.length) setMsg('deployMsg', 'err', 'Kontrak terpasang tapi ada yang tidak cocok: ' + problems.join('; ') + '. Kirim layar ini ke chat.');
+    else setMsg('deployMsg', 'ok', 'Deploy sukses dan terverifikasi. Salin alamat kontrak di bawah dan tempel ke chat.');
+  } catch (e) {
+    setMsg('deployMsg', 'warn', `Kontrak terpasang di ${c}, tapi verifikasi gagal dibaca: ${describe(e)}. Tekan Cek di bagian bawah, atau kirim alamatnya ke chat.`);
+  }
+}
+async function deploy() {
+  if (busy) return;
+  busy = true; applyButtons();
+  try {
+    if (!account || chainId !== CHAIN_ID) throw new Error('Wallet belum terhubung di jaringan Base.');
+    const owner = parseAddr($('owner').value, 'owner_'), treasury = parseAddr($('treasury').value, 'treasury_');
+    if (!$('confirmDeploy').checked) throw new Error('Centang dulu kotak konfirmasi owner_/treasury_.');
+    if ((loadContract() || loadPending()) && !$('confirmRedeploy').checked) throw new Error('Halaman ini mengingat deploy sebelumnya (lihat tulisan merah). Kalau memang mau kontrak baru, centang kotak merah.');
+    if (loadPending() && $('confirmRedeploy').checked) clearPending();
+    if (owner.toLowerCase() !== account.toLowerCase()) {
+      if (!confirm(`owner_ (${owner}) BUKAN akun yang terhubung (${account}) dan TIDAK BISA diganti setelah deploy. Akun yang terhubung hanya membayar gas; setOperator nanti harus dari ${owner}. Lanjutkan?`)) throw new Error('Dibatalkan.');
+    }
+    await assertLive();
+    const data = BYTECODE + pad32(owner) + pad32(WETH) + pad32(treasury);
+    const nonce = parseInt(await rpc('eth_getTransactionCount', [account, 'pending']), 16);
+    const pending = { kind: 'deploy', from: account, nonce, owner, treasury, sentAt: Date.now() };
+    savePending(pending); showGuard();
+    setMsg('deployMsg', 'info', 'Konfirmasi di MetaMask, lalu di Ledger (tekan sampai Accept). Jangan tutup halaman ini.');
+    let hash;
+    try { hash = await rpc('eth_sendTransaction', [{ from: account, data, gas: GAS_DEPLOY, chainId: CHAIN_HEX }]); }
+    catch (e) { clearPending(); showGuard(); throw e; }
+    savePending({ ...pending, hash }); showGuard();
+    await finishDeploy(hash, owner, treasury);
+  } catch (e) { setMsg('deployMsg', 'err', describe(e)); }
+  finally { busy = false; applyButtons(); showGuard(); }
+}
+// After a reload: carry on waiting for a transaction this page sent, or find
+// the contract of a deploy whose hash never came back (the page was closed
+// after the Ledger confirmed).
+async function resumePending() {
+  const p = loadPending();
+  if (!p) return;
+  busy = true; applyButtons();
+  try {
+    if (p.kind === 'setOperator' && p.hash) {
+      setMsg('opMsg', 'info', `Melanjutkan menunggu setOperator ${p.hash}...`);
+      const r = await waitReceipt(p.hash, 'opMsg');
+      clearPending();
+      const now = r.status === '0x1' ? await readOperator(p.contract, p.operator) : null;
+      if (now === true) setMsg('opMsg', 'ok', `Sukses: operators(${p.operator}) = true. Laporkan ke chat: "setOperator sudah".`);
+      else setMsg('opMsg', 'err', `setOperator ${p.hash} tidak berhasil (status ${r.status}, operators = ${now}). Kirim layar ini ke chat.`);
+      return;
+    }
+    if (p.kind !== 'deploy') { clearPending(); return; }
+    if (p.hash) {
+      setMsg('deployMsg', 'info', `Melanjutkan menunggu deploy ${p.hash}...`);
+      await finishDeploy(p.hash, p.owner, p.treasury);
+      return;
+    }
+    // No hash: did the wallet broadcast it anyway?
+    const predicted = createAddress(p.from, p.nonce);
+    for (let i = 0; i < 240; i++) {
+      const code = await rpc('eth_getCode', [predicted, 'latest']);
+      if (code && code.length > 2) {
+        saveContract(predicted); clearPending(); showDeployed(predicted, null, null); showGuard();
+        setMsg('deployMsg', 'ok', `Deploy sebelumnya ternyata sudah masuk: kontrak di ${predicted}. Tekan Cek di bawah untuk memastikan owner/treasury, lalu kirim alamatnya ke chat.`);
+        return;
+      }
+      const latest = parseInt(await rpc('eth_getTransactionCount', [p.from, 'latest']), 16);
+      const pend = parseInt(await rpc('eth_getTransactionCount', [p.from, 'pending']), 16);
+      if (latest > p.nonce) {
+        setMsg('deployMsg', 'warn', `Transaksi dengan nonce ${p.nonce} dari ${p.from} sudah masuk blok tapi tidak membuat kontrak di ${predicted} (mungkin dibatalkan). Cek ${EXPLORER}/address/${p.from}. Kalau memang tidak ada kontrak, centang kotak merah dan deploy lagi.`);
+        return;
+      }
+      if (pend <= p.nonce) { clearPending(); showGuard(); setMsg('deployMsg', '', ''); return; } // never broadcast
+      setMsg('deployMsg', 'info', `Deploy sebelumnya masih menunggu di jaringan (nonce ${p.nonce}; ${i * 3} detik). Kontrak akan muncul di ${predicted}.`);
+      await sleep(3000);
+    }
+    setMsg('deployMsg', 'warn', `Deploy sebelumnya (nonce ${p.nonce}) belum masuk setelah 12 menit. Cek ${EXPLORER}/address/${p.from}; muat ulang halaman untuk menunggu lagi.`);
+  } catch (e) { setMsg('deployMsg', 'err', describe(e)); }
+  finally { busy = false; applyButtons(); showGuard(); }
+}
+
+/* ---------------------------------------------------------- setOperator */
+async function setOperator() {
+  if (busy) return;
+  busy = true; applyButtons();
+  try {
+    if (!account || chainId !== CHAIN_ID) throw new Error('Wallet belum terhubung di jaringan Base.');
+    const c = parseAddr($('opContract').value, 'alamat kontrak'), op = parseAddr($('operator').value, 'alamat operator');
+    if (op.toLowerCase() === c.toLowerCase()) throw new Error('Alamat operator yang diisi adalah alamat kontrak itu sendiri. Operator = alamat kunci di server (dari chat).');
+    if (op.toLowerCase() === WETH.toLowerCase()) throw new Error('Itu alamat WETH, bukan operator.');
+    setMsg('opMsg', 'info', 'Memeriksa kontrak...');
+    const info = await readContract(c);
+    if (info.codeBytes === 0) throw new Error(`Tidak ada kontrak di ${c}.`);
+    if (info.owner.toLowerCase() !== account.toLowerCase()) throw new Error(`Akun yang terhubung (${account}) bukan owner kontrak (${info.owner}). Pilih akun owner di MetaMask, tekan Connect lagi.`);
+    if (op.toLowerCase() === info.owner.toLowerCase()) throw new Error('Alamat operator yang diisi adalah owner (Ledger). Operator harus alamat kunci di server, dari chat.');
+    const opCode = await rpc('eth_getCode', [op, 'latest']);
+    if (opCode && opCode.length > 2) throw new Error(`${op} adalah kontrak, bukan alamat kunci operator. Periksa alamat dari chat.`);
+    if (await readOperator(c, op) === true) { setMsg('opMsg', 'ok', `operators(${op}) sudah true. Tidak perlu transaksi lagi.`); return; }
+    if (!confirm(`Daftarkan ${op} sebagai operator kontrak ${c}?`)) throw new Error('Dibatalkan.');
+    await assertLive();
+    setMsg('opMsg', 'info', 'Konfirmasi di MetaMask, lalu di Ledger. Jangan tutup halaman ini.');
+    const data = SEL.setOperator + pad32(op) + '0'.repeat(63) + '1';
+    const hash = await rpc('eth_sendTransaction', [{ from: account, to: c, data, gas: GAS_SET_OPERATOR, chainId: CHAIN_HEX }]);
+    savePending({ kind: 'setOperator', contract: c, operator: op, hash, sentAt: Date.now() });
+    const r = await waitReceipt(hash, 'opMsg');
+    clearPending();
+    if (r.status !== '0x1') throw new Error(`Transaksi setOperator GAGAL (revert): ${EXPLORER}/tx/${hash}`);
+    const now = await readOperator(c, op);
+    if (now === true) setMsg('opMsg', 'ok', `Sukses: operators(${op}) = true (blok ${parseInt(r.blockNumber, 16)}). Laporkan ke chat: "setOperator sudah".`);
+    else setMsg('opMsg', 'err', `Transaksi masuk tapi operators(${op}) = ${now}. Kirim layar ini ke chat.`);
+  } catch (e) { setMsg('opMsg', 'err', describe(e)); }
+  finally { busy = false; applyButtons(); }
+}
+
+/* ---------------------------------------------------------------- check */
+async function check() {
+  try {
+    const c = parseAddr($('checkContract').value, 'alamat kontrak');
+    const info = await readContract(c);
+    let text = `kode: ${info.codeBytes} byte\nowner(): ${info.owner}\ntreasury(): ${info.treasury}\nweth(): ${info.weth}`;
+    const opRaw = $('checkOperator').value.trim();
+    if (opRaw && info.codeBytes) { const op = parseAddr(opRaw, 'alamat operator'); text += `\noperators(${op}): ${await readOperator(c, op)}`; }
+    setMsg('checkMsg', info.codeBytes ? 'info' : 'err', info.codeBytes ? text : `Tidak ada kontrak di ${c}.`);
+  } catch (e) { setMsg('checkMsg', 'err', describe(e)); }
+}
+
+/* ----------------------------------------------------------------- wire */
+$('weth').value = WETH;
+$('btnConnect').addEventListener('click', connect);
+$('btnDeploy').addEventListener('click', deploy);
+$('btnSetOperator').addEventListener('click', setOperator);
+$('btnCheck').addEventListener('click', check);
+$('btnCopy').addEventListener('click', async () => {
+  const el = $('contractAddr'), a = el.value;
+  let ok = false;
+  try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(a); ok = true; } } catch (e) {}
+  if (!ok) { try { el.focus(); el.select(); el.setSelectionRange(0, a.length); ok = document.execCommand('copy'); } catch (e) {} }
+  setMsg('deployMsg', ok ? 'ok' : 'warn', ok ? `Alamat disalin: ${a}` : 'Tidak bisa menyalin otomatis; tekan lama kotak alamat, pilih semua, lalu Copy.');
+});
+function boot() {
+  if (eth()) { refreshWallet(); return; }
+  setMsg('walletMsg', 'info', 'Menunggu MetaMask...');
+  window.addEventListener('ethereum#initialized', () => refreshWallet(), { once: true });
+  setTimeout(() => { if (eth()) refreshWallet(); else setMsg('walletMsg', 'err', 'MetaMask tidak ditemukan di browser ini. Buka halaman ini dari browser DI DALAM aplikasi MetaMask (menu > Browser), bukan Chrome/Safari biasa.'); }, 3000);
+}
+boot();
+window.__liq = { keccak256: (s) => toHex(keccak256(utf8(s))), toChecksum, parseAddr, createAddress, BYTECODE, SEL };
+</script>
+</body>
+</html>
